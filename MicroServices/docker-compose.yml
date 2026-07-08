@@ -1,0 +1,123 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2025-latest
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=YourStrong!Passw0rd
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"YourStrong!Passw0rd\" -C -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+    user: root
+  
+  postgres:
+    image: postgres:15
+    container_name: microservices-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: servicedb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d servicedb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  mongodb:
+    image: mongo:8.0
+    container_name: microservices-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  customerservice:
+    image: ${DOCKER_REGISTRY-}customerservice
+    build:
+      context: .
+      dockerfile: CustomerService/Dockerfile
+    environment:
+      - ASPNETCORE_URLS=http://0.0.0.0:80
+      - ConnectionStrings__DefaultConnection=Server=sqlserver,1433;Database=customerdb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=True;
+    ports:
+      - "5001:80"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+
+  productservice:
+    image: ${DOCKER_REGISTRY-}productservice
+    build:
+      context: .
+      dockerfile: ProductService/Dockerfile
+    environment:
+      - ASPNETCORE_URLS=http://0.0.0.0:80
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=productDb;Username=postgres;Password=postgres;
+    ports:
+      - "5002:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  orderservice:
+    image: ${DOCKER_REGISTRY-}orderservice
+    build:
+      context: .
+      dockerfile: OrderService/Dockerfile
+    container_name: microservices-order-service
+    environment:
+      - ASPNETCORE_URLS=http://0.0.0.0:80
+      - ConnectionStrings__MongoDB=mongodb://mongodb:27017
+      - DatabaseName=OrderDb
+    ports:
+      - "5003:80"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  apigateway:
+    image: ${DOCKER_REGISTRY-}apigateway
+    build:
+      context: .
+      dockerfile: ApiGateway/Dockerfile
+    environment:
+      - ASPNETCORE_URLS=http://0.0.0.0:80
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ReverseProxy__Routes__customerservice__ClusterId=customerservice-cluster
+      - ReverseProxy__Routes__customerservice__Match__Path=/api/customer/{**catch-all}
+      - ReverseProxy__Clusters__customerservice-cluster__Destinations__destination1__Address=http://customerservice
+      - ReverseProxy__Routes__productservice__ClusterId=productservice-cluster
+      - ReverseProxy__Routes__productservice__Match__Path=/api/product/{**catch-all}
+      - ReverseProxy__Clusters__productservice-cluster__Destinations__destination1__Address=http://productservice
+      - ReverseProxy__Routes__orderservice__ClusterId=orderservice-cluster
+      - ReverseProxy__Routes__orderservice__Match__Path=/api/order/{**catch-all}
+      - ReverseProxy__Clusters__orderservice-cluster__Destinations__destination1__Address=http://orderservice
+    ports:
+      - "8080:80"
+    depends_on:
+      - customerservice
+      - productservice
+      - orderservice
+
+
+volumes:
+  sqlserver_data:
+  postgres_data:
+  mongo-data:

@@ -1,0 +1,9 @@
+<Solution>
+  <Project Path="ApiGateway/ApiGateway.csproj" Id="212d0289-ec4d-42ee-9d02-e34ed25e8175" />
+  <Project Path="CustomerService/CustomerService.csproj" />
+  <Project Path="docker-compose.dcproj">
+    <Build />
+  </Project>
+  <Project Path="OrderService/OrderService.csproj" />
+  <Project Path="ProductService/ProductService.csproj" />
+</Solution>
